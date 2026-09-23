@@ -1,0 +1,37 @@
+# © Happy AI · 给教程截图：在一次性 Windows 虚拟机上装好软件、打开、截图（我们自己的截图）
+name: tutorial-shots
+on:
+  workflow_dispatch:
+jobs:
+  cherry:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download & install Cherry Studio (official GitHub release)
+        shell: pwsh
+        run: |
+          $rel = Invoke-RestMethod https://api.github.com/repos/CherryHQ/cherry-studio/releases/latest
+          $a = $rel.assets | Where-Object { $_.name -match 'x64-setup\.exe$|setup.*x64.*\.exe$|Setup.*\.exe$' } | Select-Object -First 1
+          if (-not $a) { $a = $rel.assets | Where-Object { $_.name -match '\.exe$' } | Select-Object -First 1 }
+          Write-Host "asset: $($a.name)"
+          Invoke-WebRequest $a.browser_download_url -OutFile cherry-setup.exe
+          Start-Process .\cherry-setup.exe -ArgumentList '/S' -Wait
+          Start-Sleep -Seconds 5
+      - name: Launch and screenshot
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Cherry Studio.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { $exe = Get-ChildItem "C:\Program Files" -Recurse -Filter "Cherry Studio.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          Write-Host "exe: $($exe.FullName)"
+          if ($exe) { Start-Process $exe.FullName; Start-Sleep -Seconds 30 }
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("cherry-main.png")
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cherry-shots
+          path: cherry-main.png
+          if-no-files-found: warn
