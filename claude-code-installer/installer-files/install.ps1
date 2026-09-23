@@ -242,6 +242,21 @@ if ($CcsExe) {
   }
 }
 
+# 建快捷方式：老式 WScript.Shell 在非中文系统上存不了中文文件名 → 先用英文临时名保存，再改成中文名；真的存在才算成功
+function Save-Lnk([string]$Path, [scriptblock]$Fill) {
+  $tmpLnk = Join-Path (Split-Path $Path) ("happyai-tmp-" + [guid]::NewGuid().ToString('N') + ".lnk")
+  try {
+    $sh = New-Object -ComObject WScript.Shell
+    $s = $sh.CreateShortcut($tmpLnk)
+    & $Fill $s
+    $s.Save()
+    Move-Item -LiteralPath $tmpLnk -Destination $Path -Force
+  } catch {
+    if (Test-Path -LiteralPath $tmpLnk) { Remove-Item -LiteralPath $tmpLnk -Force -ErrorAction SilentlyContinue }
+  }
+  return (Test-Path -LiteralPath $Path)
+}
+
 # ============ 第 5 步：桌面图标 + 配置 ============
 Step 5 "在桌面放图标"
 $Desk = [Environment]::GetFolderPath('Desktop')     # 桌面被 OneDrive 接管也能找对
@@ -261,17 +276,18 @@ else {
   $inner = "`$host.UI.RawUI.WindowTitle='Claude Code'; Write-Host '正在启动 Claude Code……（第一次会让你登录或填 key，按提示走就行）'; Write-Host '想退出：输入 /exit 回车，或者直接关掉这个窗口。'; & '$ClaudePath'"
   if ($DryRun) { Plan "桌面快捷方式 $Lnk1 → powershell 打开工作文件夹并运行 $ClaudePath" }
   else {
-    $sh = New-Object -ComObject WScript.Shell
-    $s = $sh.CreateShortcut($Lnk1)
-    $s.TargetPath = $psExe
-    $s.Arguments = "-NoExit -NoLogo -ExecutionPolicy Bypass -Command `"$inner`""
-    $s.WorkingDirectory = $Ws
     $exeGuess = Join-Path (Split-Path $ClaudePath) 'node_modules\@anthropic-ai\claude-code\bin\claude.exe'
-    if ($ClaudePath -like '*.exe') { $s.IconLocation = "$ClaudePath,0" } elseif (Test-Path $exeGuess) { $s.IconLocation = "$exeGuess,0" }
-    $s.Description = '打开 Claude Code'
-    $s.Save()
+    $ok1 = Save-Lnk $Lnk1 {
+      param($s)
+      $s.TargetPath = $psExe
+      $s.Arguments = "-NoExit -NoLogo -ExecutionPolicy Bypass -Command `"$inner`""
+      $s.WorkingDirectory = $Ws
+      if ($ClaudePath -like '*.exe') { $s.IconLocation = "$ClaudePath,0" } elseif (Test-Path $exeGuess) { $s.IconLocation = "$exeGuess,0" }
+      $s.Description = 'Claude Code'
+    }
   }
-  Ok "桌面图标「$($Cfg.shortcuts.claude_name)」已放好"
+  if ($DryRun -or $ok1) { Ok "桌面图标「$($Cfg.shortcuts.claude_name)」已放好" }
+  else { Warn "桌面图标「$($Cfg.shortcuts.claude_name)」没放上。"; [void]$Problems.Add("桌面图标「$($Cfg.shortcuts.claude_name)」没放上：可以在开始菜单搜 PowerShell，输入 claude 回车来用") }
 }
 
 if (-not $CcsExe) { Warn "CC Switch 没装上，先不放它的图标（重新双击安装器会补上）" }
@@ -279,15 +295,16 @@ elseif ((Test-Path $Lnk2) -and -not $PretendFresh) { Ok "桌面已经有「$($Cf
 else {
   if ($DryRun) { Plan "桌面快捷方式 $Lnk2 → $CcsExe" }
   else {
-    $sh = New-Object -ComObject WScript.Shell
-    $s = $sh.CreateShortcut($Lnk2)
-    $s.TargetPath = $CcsExe
-    $s.WorkingDirectory = Split-Path $CcsExe
-    $s.IconLocation = "$CcsExe,0"
-    $s.Description = 'CC Switch：一键切换 Claude Code 的 key / 中转地址'
-    $s.Save()
+    $ok2 = Save-Lnk $Lnk2 {
+      param($s)
+      $s.TargetPath = $CcsExe
+      $s.WorkingDirectory = Split-Path $CcsExe
+      $s.IconLocation = "$CcsExe,0"
+      $s.Description = 'CC Switch'
+    }
   }
-  Ok "桌面图标「$($Cfg.shortcuts.ccswitch_name)」已放好"
+  if ($DryRun -or $ok2) { Ok "桌面图标「$($Cfg.shortcuts.ccswitch_name)」已放好" }
+  else { Warn "桌面图标「$($Cfg.shortcuts.ccswitch_name)」没放上。"; [void]$Problems.Add("桌面图标「$($Cfg.shortcuts.ccswitch_name)」没放上：CC Switch 在 $CcsExe，双击它也能打开") }
 }
 
 # 配置位：将来灵极 API 预填（现在 config.json 为空 → 跳过，不写任何 key）
