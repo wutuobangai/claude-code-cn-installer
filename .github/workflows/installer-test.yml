@@ -1,0 +1,125 @@
+# ============================================================
+# 草稿（未推送，未跑过）：Claude Code 中文一键安装器 · 云端真机测试
+# 用法：将来放进某个仓库的 .github/workflows/installer-test.yml，
+#       安装器文件放在仓库里的 claude-code-installer/ 目录下（与本草稿同级结构）。
+# 手动触发（workflow_dispatch），不会自动跑。
+# GitHub 的 windows-latest / macos-latest 是一次性虚拟机，真装不会影响任何人的电脑。
+# ============================================================
+name: installer-test
+
+on:
+  workflow_dispatch:
+
+env:
+  INSTALLER_DIR: claude-code-installer
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: powershell   # 故意用 Windows PowerShell 5.1，和普通用户电脑一致
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 1) install.ps1 语法检查（PowerShell 5.1 解析器）
+        run: |
+          $errs = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$env:GITHUB_WORKSPACE\$env:INSTALLER_DIR\installer-files\install.ps1", [ref]$null, [ref]$errs) | Out-Null
+          if ($errs.Count -gt 0) { $errs | ForEach-Object { Write-Host $_ }; exit 1 }
+          Write-Host "PARSE_OK"
+
+      - name: 2) 演练模式（-DryRun -PretendFresh）：必须 0 退出，且不能在桌面留下任何东西
+        run: |
+          $desk = [Environment]::GetFolderPath('Desktop')
+          $before = @(Get-ChildItem $desk -Force -ErrorAction SilentlyContinue).Count
+          Set-Location "$env:GITHUB_WORKSPACE\$env:INSTALLER_DIR"
+          cmd /c ".\双击安装.bat" -DryRun -PretendFresh -NoPause
+          if ($LASTEXITCODE -ne 0) { Write-Host "dry-run exit=$LASTEXITCODE"; exit 1 }
+          $after = @(Get-ChildItem $desk -Force -ErrorAction SilentlyContinue).Count
+          if ($after -ne $before) { Write-Host "dry-run 改动了桌面！ before=$before after=$after"; exit 1 }
+          Write-Host "DRYRUN_OK"
+
+      - name: 3) 真装（-PretendFresh：忽略 runner 自带的 Node，走完整流程）
+        run: |
+          Set-Location "$env:GITHUB_WORKSPACE\$env:INSTALLER_DIR"
+          cmd /c ".\双击安装.bat" -PretendFresh -NoPause
+          if ($LASTEXITCODE -ne 0) { Write-Host "install exit=$LASTEXITCODE"; exit 1 }
+
+      - name: 4) 检查：桌面两个快捷方式存在、目标文件存在、claude 能跑
+        run: |
+          $desk = [Environment]::GetFolderPath('Desktop')
+          $sh = New-Object -ComObject WScript.Shell
+          $l1 = Join-Path $desk '打开 Claude Code.lnk'
+          $l2 = Join-Path $desk 'CC Switch 切换 key.lnk'
+          foreach ($l in @($l1, $l2)) { if (-not (Test-Path $l)) { Write-Host "缺快捷方式：$l"; exit 1 } }
+          $t1 = $sh.CreateShortcut($l1); $t2 = $sh.CreateShortcut($l2)
+          Write-Host "Claude 快捷方式 → $($t1.TargetPath) $($t1.Arguments)"
+          Write-Host "CC Switch 快捷方式 → $($t2.TargetPath)"
+          if (-not (Test-Path $t2.TargetPath)) { Write-Host "cc-switch.exe 不存在"; exit 1 }
+          # 从用户 PATH 重新加载后找 claude（模拟用户新开窗口）
+          $env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine')
+          $c = (Get-Command claude.cmd, claude.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+          if (-not $c) { Write-Host "新窗口里找不到 claude"; exit 1 }
+          & $c --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # 快捷方式里写死的 claude 路径必须真实存在
+          if ($t1.Arguments -match "& '([^']+)'") { if (-not (Test-Path $Matches[1])) { Write-Host "快捷方式里的 claude 路径不存在：$($Matches[1])"; exit 1 } } else { Write-Host "快捷方式参数里没找到 claude 路径"; exit 1 }
+          Write-Host "SHORTCUTS_OK"
+
+      - name: 5) 再双击一次（不带 -PretendFresh）：全部应显示「跳过」，不重复装
+        run: |
+          Set-Location "$env:GITHUB_WORKSPACE\$env:INSTALLER_DIR"
+          $out = cmd /c ".\双击安装.bat" -NoPause 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $skips = ([regex]::Matches($out, '跳过')).Count
+          Write-Host "跳过次数=$skips"
+          if ($skips -lt 4) { Write-Host "第二次运行应至少 4 处跳过（Node/Claude/CC Switch/两个图标）"; exit 1 }
+
+      - name: 截图：打开 CC Switch（给教程用，我们自己的截图）
+        if: always()
+        run: |
+          $desk = [Environment]::GetFolderPath('Desktop')
+          $sh = New-Object -ComObject WScript.Shell
+          $t = $sh.CreateShortcut((Join-Path $desk 'CC Switch 切换 key.lnk')).TargetPath
+          if ($t -and (Test-Path $t)) { Start-Process $t; Start-Sleep -Seconds 20 }
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$env:GITHUB_WORKSPACE\ccswitch-desktop.png")
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-screenshots
+          path: ccswitch-desktop.png
+          if-no-files-found: warn
+
+      - name: 上传安装日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-install-log
+          path: C:\Users\runneradmin\AppData\Local\ClaudeCode中文安装器.log
+          if-no-files-found: warn
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: 语法检查
+        run: bash -n "$INSTALLER_DIR/双击安装.command"
+      - name: 演练模式
+        run: bash "$INSTALLER_DIR/双击安装.command" --dry-run --pretend-fresh --no-pause
+      - name: 真装（一次性虚拟机）
+        run: bash "$INSTALLER_DIR/双击安装.command" --pretend-fresh --no-pause
+      - name: 检查桌面图标 + claude 能跑
+        run: |
+          test -x "$HOME/Desktop/打开 Claude Code.command"
+          test -d "$HOME/Desktop/CC Switch 切换 key.app"
+          test -d "$HOME/Applications/CC Switch.app"
+          "$HOME/.local/bin/claude" --version
+          echo SHORTCUTS_OK

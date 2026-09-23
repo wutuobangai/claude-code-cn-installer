@@ -1,0 +1,41 @@
+{
+  "_说明": "安装器配置。普通用户不用打开这个文件。字段为空 = 安装器按默认走，不写任何 key。",
+  "installer_version": "0.1.0-draft-20260923",
+
+  "api": {
+    "_说明": "【配置位·现在留空】将来灵极 API 上线后，由我们在打包前填好 base_url 和 api_key。两个都非空时，安装器才会把它们写进用户的 ~/.claude/settings.json（写前自动备份原文件）。现在为空 = 不写，用户用 Claude 官方账号登录，或自己在 CC Switch 里填中转地址。",
+    "provider_name": "灵极 API",
+    "base_url": "",
+    "api_key": "",
+    "model": ""
+  },
+
+  "node": {
+    "_说明": "只在电脑上没有 Node.js 22 以上时才装。优先国内镜像，失败再走官方。装在用户自己的目录，不要管理员密码。",
+    "min_major": 22,
+    "fallback_version": "v24.21.0",
+    "mirror_base": "https://npmmirror.com/mirrors/node",
+    "official_base": "https://nodejs.org/dist"
+  },
+
+  "claude_code": {
+    "_说明": "先用国内 npm 镜像装官方 npm 包；失败再用官方原生安装脚本。",
+    "npm_package": "@anthropic-ai/claude-code",
+    "npm_registry": "https://registry.npmmirror.com",
+    "official_install_sh": "https://claude.ai/install.sh",
+    "official_install_ps1": "https://claude.ai/install.ps1"
+  },
+
+  "cc_switch": {
+    "_说明": "从原作者 GitHub Release 下载官方包（MIT 许可，不改一个字）。extra_download_base 留给将来我们自己的 OSS 备份地址（填形如 https://xxx/cc-switch/v3.20.4/ 的目录，里面放同名官方文件），现在为空。",
+    "github_repo": "farion1231/cc-switch",
+    "fallback_version": "v3.20.4",
+    "extra_download_base": ""
+  },
+
+  "shortcuts": {
+    "claude_name": "打开 Claude Code",
+    "ccswitch_name": "CC Switch 切换 key",
+    "workspace_dir_name": "Claude工作区"
+  }
+}
