@@ -19,7 +19,8 @@ jobs:
     timeout-minutes: 40
     defaults:
       run:
-        shell: powershell   # 故意用 Windows PowerShell 5.1，和普通用户电脑一致
+        # 测试步骤用 pwsh（能正确读取本文件里的中文）；安装器本身仍由 双击安装.bat 调 Windows PowerShell 5.1 执行，和普通用户电脑一致
+        shell: pwsh
     steps:
       - uses: actions/checkout@v4
 
