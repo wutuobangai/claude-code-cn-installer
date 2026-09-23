@@ -205,8 +205,8 @@ else
   if [ "$DRY" = 1 ]; then
     probe_url "$NPM_REG/$NPM_PKG/latest" >/dev/null && info "镜像上能查到 $NPM_PKG"
   fi
-  if run "$LOCAL_BIN/npm" install -g --prefix "$HOME/.local" "$NPM_PKG" --registry="$NPM_REG" --no-fund --no-audit \
-     || run npm install -g --prefix "$HOME/.local" "$NPM_PKG" --registry="$NPM_REG" --no-fund --no-audit; then
+  if run "$LOCAL_BIN/npm" install -g --prefix "$HOME/.local" "$NPM_PKG" --registry="$NPM_REG" --allow-scripts=@anthropic-ai/claude-code --no-fund --no-audit \
+     || run npm install -g --prefix "$HOME/.local" "$NPM_PKG" --registry="$NPM_REG" --allow-scripts=@anthropic-ai/claude-code --no-fund --no-audit; then
     CLAUDE_BIN="$LOCAL_BIN/claude"
   fi
   if [ "$DRY" = 0 ] && ! "$LOCAL_BIN/claude" --version >/dev/null 2>&1; then

@@ -174,11 +174,12 @@ if ($ClaudePath) {
   Info "方式一：从国内 npm 镜像装官方包 $NpmPkg"
   if ($DryRun) {
     if (Probe-Url "$NpmReg/$NpmPkg/latest") { Info "镜像上能查到 $NpmPkg" }
-    Plan "npm.cmd install -g $NpmPkg --registry=$NpmReg --no-fund --no-audit"
+    Plan "npm.cmd install -g $NpmPkg --registry=$NpmReg --allow-scripts=@anthropic-ai/claude-code --no-fund --no-audit"
     Info "（真装时如果方式一失败，会自动换方式二：官方脚本 irm $($Cfg.claude_code.official_install_ps1) | iex）"
     $ClaudePath = '(演练)claude'
   } else {
-    & npm.cmd install -g $NpmPkg "--registry=$NpmReg" --no-fund --no-audit
+    # 新版 npm 默认拦包的安装后脚本，Claude Code 靠它解压程序文件，必须放行（旧版 npm 忽略此参数）
+    & npm.cmd install -g $NpmPkg "--registry=$NpmReg" "--allow-scripts=@anthropic-ai/claude-code" --no-fund --no-audit
     # npm 全局目录（MSI 装的 Node 是 %APPDATA%\npm；我们装的 Node 就是 Node 目录本身）
     try { $prefix = (& npm.cmd prefix -g 2>$null | Select-Object -First 1).Trim(); if ($prefix) { Add-UserPath $prefix } } catch {}
     $ClaudePath = Find-Claude
@@ -244,6 +245,9 @@ if ($CcsExe) {
 # ============ 第 5 步：桌面图标 + 配置 ============
 Step 5 "在桌面放图标"
 $Desk = [Environment]::GetFolderPath('Desktop')     # 桌面被 OneDrive 接管也能找对
+if (-not $Desk) { $Desk = Join-Path $env:USERPROFILE 'Desktop' }
+# 保存快捷方式前确保桌面文件夹存在（不存在时 .Save() 会报「找不到文件」）
+if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $Desk | Out-Null }
 $Ws = Join-Path $env:USERPROFILE $Cfg.shortcuts.workspace_dir_name
 if ($DryRun) { Plan "新建工作文件夹 $Ws" } else { New-Item -ItemType Directory -Force -Path $Ws | Out-Null }
 Info "工作文件夹：$Ws（Claude Code 默认在这里干活）"
