@@ -5,7 +5,7 @@
 >
 > 装好了还要账号：**Claude Pro / Max、ChatGPT Plus / Pro、Grok、Gemini 会员正规充值** → [Happy AI 官网](https://wutuobangai.top/?utm_source=github&utm_medium=readme&utm_campaign=claude-code-installer-20260923) · 用中转 key 的看 [CC Switch 填 key 教程](https://wutuobangai.top/tutorial-cc-switch.html?utm_source=github&utm_medium=readme&utm_campaign=claude-code-installer-20260923)
 >
-> <img src="https://wutuobangai.top/assets/top/wechat-qr-work.png" width="160" alt="扫码加阿浩企业微信"> 扫码加阿浩（企业微信），装不上、不会登录都可以问，送一次 AI 诊断。
+> <img src="https://cdn.wutuobangai.com/tools/common/happyai-wecom-qr.png" width="160" alt="扫码加阿浩企业微信"> 扫码加阿浩（企业微信），装不上、不会登录都可以问，送一次 AI 诊断。
 
 双击就装好 **Claude Code** 和 **CC Switch**（一键切换 key / 中转），桌面出现两个图标，点开就能用。全程中文提示，不需要管理员权限，已经装过的自动跳过。
 
