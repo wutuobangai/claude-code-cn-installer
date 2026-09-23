@@ -55,7 +55,7 @@ jobs:
           $l1 = Join-Path $desk '打开 Claude Code.lnk'
           $l2 = Join-Path $desk 'CC Switch 切换 key.lnk'
           foreach ($l in @($l1, $l2)) { if (-not (Test-Path $l)) { Write-Host "缺快捷方式：$l"; exit 1 } }
-          $t1 = $sh.CreateShortcut($l1); $t2 = $sh.CreateShortcut($l2)
+          $rd = { param($p) $tmp = Join-Path $env:TEMP ('rd-' + [guid]::NewGuid().ToString('N') + '.lnk'); Copy-Item -LiteralPath $p -Destination $tmp -Force; $sh.CreateShortcut($tmp) }; $t1 = & $rd $l1; $t2 = & $rd $l2
           Write-Host "Claude 快捷方式 → $($t1.TargetPath) $($t1.Arguments)"
           Write-Host "CC Switch 快捷方式 → $($t2.TargetPath)"
           if (-not (Test-Path $t2.TargetPath)) { Write-Host "cc-switch.exe 不存在"; exit 1 }
@@ -84,7 +84,7 @@ jobs:
         run: |
           $desk = [Environment]::GetFolderPath('Desktop')
           $sh = New-Object -ComObject WScript.Shell
-          $t = $sh.CreateShortcut((Join-Path $desk 'CC Switch 切换 key.lnk')).TargetPath
+          $tmp = Join-Path $env:TEMP 'rd-ccs.lnk'; Copy-Item -LiteralPath (Join-Path $desk 'CC Switch 切换 key.lnk') -Destination $tmp -Force; $t = $sh.CreateShortcut($tmp).TargetPath
           if ($t -and (Test-Path $t)) { Start-Process $t; Start-Sleep -Seconds 20 }
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
           $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
