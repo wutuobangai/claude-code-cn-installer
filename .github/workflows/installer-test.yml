@@ -48,25 +48,48 @@ jobs:
           cmd /c ".\双击安装.bat" -PretendFresh -NoPause
           if ($LASTEXITCODE -ne 0) { Write-Host "install exit=$LASTEXITCODE"; exit 1 }
 
-      - name: 4) 检查：桌面两个快捷方式存在、目标文件存在、claude 能跑
+      - name: 4) 检查：两个快捷方式存在；Claude 的 .lnk 只含英文字符、指向的 open-claude.ps1 存在、脚本里的 claude 路径和工作区对、claude 能跑
         run: |
           $desk = [Environment]::GetFolderPath('Desktop')
           $sh = New-Object -ComObject WScript.Shell
           $l1 = Join-Path $desk '打开 Claude Code.lnk'
           $l2 = Join-Path $desk 'CC Switch 切换 key.lnk'
-          foreach ($l in @($l1, $l2)) { if (-not (Test-Path $l)) { Write-Host "缺快捷方式：$l"; exit 1 } }
+          foreach ($l in @($l1, $l2)) { if (-not (Test-Path -LiteralPath $l)) { Write-Host "缺快捷方式：$l"; exit 1 } }
+          # 老式 WScript.Shell 读不了中文文件名 → 先复制成英文临时名再读
           $rd = { param($p) $tmp = Join-Path $env:TEMP ('rd-' + [guid]::NewGuid().ToString('N') + '.lnk'); Copy-Item -LiteralPath $p -Destination $tmp -Force; $sh.CreateShortcut($tmp) }; $t1 = & $rd $l1; $t2 = & $rd $l2
           Write-Host "Claude 快捷方式 → $($t1.TargetPath) $($t1.Arguments)"
+          Write-Host "工作目录 → $($t1.WorkingDirectory)"
           Write-Host "CC Switch 快捷方式 → $($t2.TargetPath)"
           if (-not (Test-Path $t2.TargetPath)) { Write-Host "cc-switch.exe 不存在"; exit 1 }
+          foreach ($v in @($t1.TargetPath, $t1.Arguments, $t1.WorkingDirectory, $t1.IconLocation)) {
+            if ($v -match '[^\x00-\x7F]' -or $v -match '\?') { Write-Host "快捷方式里有非英文字符或问号：$v"; exit 1 }
+          }
+          if ($t1.WorkingDirectory -and -not (Test-Path -LiteralPath $t1.WorkingDirectory)) { Write-Host "快捷方式的起始目录不存在"; exit 1 }
+          if ($t1.Arguments -notmatch '-File "([^"]+open-claude\.ps1)"') { Write-Host "快捷方式参数里没找到 open-claude.ps1"; exit 1 }
+          $launcher = $Matches[1]
+          if (-not (Test-Path -LiteralPath $launcher)) { Write-Host "启动脚本不存在：$launcher"; exit 1 }
+          $raw = [IO.File]::ReadAllBytes($launcher)
+          if (-not ($raw[0] -eq 0xEF -and $raw[1] -eq 0xBB -and $raw[2] -eq 0xBF)) { Write-Host "启动脚本不是 UTF-8 带 BOM"; exit 1 }
+          $txt = [IO.File]::ReadAllText($launcher, [Text.Encoding]::UTF8)
+          Write-Host "----- open-claude.ps1 -----"; Write-Host $txt; Write-Host "---------------------------"
+          $errs = $null; [System.Management.Automation.Language.Parser]::ParseInput($txt, [ref]$null, [ref]$errs) | Out-Null
+          if ($errs.Count -gt 0) { $errs | ForEach-Object { Write-Host $_ }; exit 1 }
+          if ($txt -notmatch '(?m)^\$WsName = ''([^'']*)''') { Write-Host "启动脚本里没找到工作区名"; exit 1 }
+          $wsName = $Matches[1]
+          if ($wsName -ne 'Claude工作区') { Write-Host "工作区名不对：$wsName"; exit 1 }
+          $ws = Join-Path $env:USERPROFILE $wsName
+          if (-not (Test-Path -LiteralPath $ws)) { Write-Host "工作区不存在：$ws"; exit 1 }
+          if ($txt -notmatch '(?m)^\$BinPath = ''([^'']*)''') { Write-Host "启动脚本里没找到 claude 路径"; exit 1 }
+          $p = $Matches[1]
+          if (-not (Test-Path -LiteralPath $p)) { Write-Host "启动脚本里的 claude 路径不存在：$p"; exit 1 }
+          & $p --version
+          if ($LASTEXITCODE -ne 0) { Write-Host "启动脚本里的 claude 跑不起来"; exit 1 }
           # 从用户 PATH 重新加载后找 claude（模拟用户新开窗口）
           $env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine')
           $c = (Get-Command claude.cmd, claude.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
           if (-not $c) { Write-Host "新窗口里找不到 claude"; exit 1 }
           & $c --version
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          # 快捷方式里写死的 claude 路径必须真实存在
-          if ($t1.Arguments -match "& '([^']+)'") { if (-not (Test-Path $Matches[1])) { Write-Host "快捷方式里的 claude 路径不存在：$($Matches[1])"; exit 1 } } else { Write-Host "快捷方式参数里没找到 claude 路径"; exit 1 }
           Write-Host "SHORTCUTS_OK"
 
       - name: 5) 再双击一次（不带 -PretendFresh）：全部应显示「跳过」，不重复装

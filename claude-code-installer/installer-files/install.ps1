@@ -243,19 +243,52 @@ if ($CcsExe) {
 }
 
 # 建快捷方式：老式 WScript.Shell 在非中文系统上存不了中文文件名 → 先用英文临时名保存，再改成中文名；真的存在才算成功
-function Save-Lnk([string]$Path, [scriptblock]$Fill) {
-  $tmpLnk = Join-Path (Split-Path $Path) ("happyai-tmp-" + [guid]::NewGuid().ToString('N') + ".lnk")
+# 注意：WScript.Shell 还会把 .lnk 里的字符串（Arguments / WorkingDirectory 等）按系统 ANSI 代码页保存，
+#       英文版 Windows 上中文会变成「???」。所以 .lnk 里只放英文字符，中文全放进启动脚本（UTF-8 带 BOM）。
+function Save-Lnk([string]$Path, [scriptblock]$Fill, [string]$TmpDir) {
+  if (-not $TmpDir) { $TmpDir = Split-Path $Path }
+  $tmpLnk = Join-Path $TmpDir ("happyai-tmp-" + [guid]::NewGuid().ToString('N') + ".lnk")
   try {
     $sh = New-Object -ComObject WScript.Shell
     $s = $sh.CreateShortcut($tmpLnk)
     & $Fill $s
+    $want = $s.Arguments
     $s.Save()
+    # 回读：参数被代码页改坏（出现 ?）就不算成功
+    if ($sh.CreateShortcut($tmpLnk).Arguments -ne $want) { throw "shortcut arguments changed after save" }
     Move-Item -LiteralPath $tmpLnk -Destination $Path -Force
   } catch {
     if (Test-Path -LiteralPath $tmpLnk) { Remove-Item -LiteralPath $tmpLnk -Force -ErrorAction SilentlyContinue }
   }
   return (Test-Path -LiteralPath $Path)
 }
+
+function Test-Ascii([string]$t) { return ($t -notmatch '[^\x00-\x7F]') }
+# 路径里有中文（比如中文用户名）时，换成系统的 8.3 短路径（纯英文）；换不了返回空
+function Get-AsciiDir([string]$dir) {
+  if (Test-Ascii $dir) { return $dir }
+  try { $fso = New-Object -ComObject Scripting.FileSystemObject; $sp = $fso.GetFolder($dir).ShortPath; if ($sp -and (Test-Ascii $sp)) { return $sp } } catch {}
+  return $null
+}
+
+# 启动脚本模板（中文都放这里；安装时替换 __WS__ / __BIN__ 后存成 UTF-8 带 BOM）
+$LauncherTpl = @'
+# Claude Code 启动脚本（由「Claude Code 中文一键安装器」生成；删掉后重新双击安装器会再生成）
+$host.UI.RawUI.WindowTitle = 'Claude Code'
+$WsName = '__WS__'
+$BinPath = '__BIN__'
+$Ws = Join-Path $env:USERPROFILE $WsName
+if (-not (Test-Path -LiteralPath $Ws)) { New-Item -ItemType Directory -Force -Path $Ws | Out-Null }
+Set-Location -LiteralPath $Ws
+if (-not (Test-Path -LiteralPath $BinPath)) {
+  $c = Get-Command claude.cmd, claude.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($c) { $BinPath = $c.Source }
+}
+Write-Host '正在启动 Claude Code……（第一次会让你登录或填 key，按提示走就行）'
+Write-Host '想退出：输入 /exit 回车，或者直接关掉这个窗口。'
+Write-Host ''
+& $BinPath
+'@
 
 # ============ 第 5 步：桌面图标 + 配置 ============
 Step 5 "在桌面放图标"
@@ -271,19 +304,46 @@ $Lnk1 = Join-Path $Desk ($Cfg.shortcuts.claude_name + '.lnk')
 $Lnk2 = Join-Path $Desk ($Cfg.shortcuts.ccswitch_name + '.lnk')
 $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
-if ((Test-Path $Lnk1) -and -not $PretendFresh) { Ok "桌面已经有「$($Cfg.shortcuts.claude_name)」，跳过" }
+# 启动脚本放在英文目录（快捷方式里只能有英文字符）
+$LauncherDir = Join-Path $env:LOCALAPPDATA 'Programs\lingji-claude'
+if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $LauncherDir | Out-Null }
+$LauncherAscii = Get-AsciiDir $LauncherDir
+if (-not $LauncherAscii) {
+  # 用户名是中文、系统又关了 8.3 短路径 → 退到公共目录 C:\Users\Public（普通用户可写）
+  $pub = if ($env:PUBLIC) { $env:PUBLIC } else { 'C:\Users\Public' }
+  $LauncherDir = Join-Path $pub ('lingji-claude-' + $env:USERNAME)
+  if (-not (Test-Ascii $LauncherDir)) { $LauncherDir = Join-Path $pub ('lingji-claude-' + [guid]::NewGuid().ToString('N').Substring(0,8)) }
+  if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $LauncherDir | Out-Null }
+  $LauncherAscii = Get-AsciiDir $LauncherDir
+}
+$Launcher = Join-Path $LauncherDir 'open-claude.ps1'
+$LauncherArg = if ($LauncherAscii) { Join-Path $LauncherAscii 'open-claude.ps1' } else { $null }
+
+if ((Test-Path $Lnk1) -and (Test-Path $Launcher) -and -not $PretendFresh) { Ok "桌面已经有「$($Cfg.shortcuts.claude_name)」，跳过" }
 else {
-  $inner = "`$host.UI.RawUI.WindowTitle='Claude Code'; Write-Host '正在启动 Claude Code……（第一次会让你登录或填 key，按提示走就行）'; Write-Host '想退出：输入 /exit 回车，或者直接关掉这个窗口。'; & '$ClaudePath'"
-  if ($DryRun) { Plan "桌面快捷方式 $Lnk1 → powershell 打开工作文件夹并运行 $ClaudePath" }
-  else {
-    $exeGuess = Join-Path (Split-Path $ClaudePath) 'node_modules\@anthropic-ai\claude-code\bin\claude.exe'
-    $ok1 = Save-Lnk $Lnk1 {
-      param($s)
-      $s.TargetPath = $psExe
-      $s.Arguments = "-NoExit -NoLogo -ExecutionPolicy Bypass -Command `"$inner`""
-      $s.WorkingDirectory = $Ws
-      if ($ClaudePath -like '*.exe') { $s.IconLocation = "$ClaudePath,0" } elseif (Test-Path $exeGuess) { $s.IconLocation = "$exeGuess,0" }
-      $s.Description = 'Claude Code'
+  $ok1 = $false
+  if ($DryRun) {
+    Plan "生成启动脚本 $Launcher（UTF-8 带 BOM：进入 $Ws，运行 $ClaudePath）"
+    Plan "桌面快捷方式 $Lnk1 → $psExe -File `"$LauncherArg`"（快捷方式里只有英文字符）"
+  } elseif (-not $LauncherArg) {
+    Warn "找不到纯英文的目录放启动脚本（用户名是中文且系统关了短路径）"
+  } else {
+    try {
+      $body = $LauncherTpl.Replace('__WS__', $Cfg.shortcuts.workspace_dir_name.Replace("'", "''")).Replace('__BIN__', $ClaudePath.Replace("'", "''"))
+      [IO.File]::WriteAllText($Launcher, $body, (New-Object Text.UTF8Encoding($true)))
+    } catch { Warn "启动脚本写不进去：$($_.Exception.Message)" }
+    if (Test-Path -LiteralPath $Launcher) {
+      $icon = $null
+      $iconExe = if ($ClaudePath -like '*.exe') { $ClaudePath } else { (Join-Path (Split-Path $ClaudePath) 'node_modules\@anthropic-ai\claude-code\bin\claude.exe') }
+      if ($iconExe -and (Test-Path -LiteralPath $iconExe)) { $d = Get-AsciiDir (Split-Path $iconExe); if ($d) { $icon = (Join-Path $d (Split-Path $iconExe -Leaf)) + ',0' } }
+      $ok1 = Save-Lnk $Lnk1 {
+        param($s)
+        $s.TargetPath = $psExe
+        $s.Arguments = "-NoExit -NoLogo -ExecutionPolicy Bypass -File `"$LauncherArg`""
+        $s.WorkingDirectory = $LauncherAscii
+        if ($icon -and (Test-Ascii $icon)) { $s.IconLocation = $icon }
+        $s.Description = 'Claude Code'
+      } $LauncherAscii
     }
   }
   if ($DryRun -or $ok1) { Ok "桌面图标「$($Cfg.shortcuts.claude_name)」已放好" }

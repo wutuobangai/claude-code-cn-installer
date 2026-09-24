@@ -28,6 +28,8 @@
 | 桌面图标 ×2 | 桌面上还没有时 | `.lnk` 快捷方式 | `打开 Claude Code.command` + `CC Switch 切换 key.app` |
 | 工作文件夹 | — | `%USERPROFILE%\Claude工作区` | `~/Claude工作区` |
 
+Windows 桌面「打开 Claude Code」是个只含英文字符的快捷方式：`powershell.exe -File "%LOCALAPPDATA%\Programs\lingji-claude\open-claude.ps1"`；中文提示、进入「Claude工作区」、运行 claude 都写在这个 UTF-8 带 BOM 的启动脚本里（2026-09-24 修：英文版 Windows 上 .lnk 里的中文会变成 `???`，快捷方式打不开）。旧版装出的坏图标，重新双击安装器会自动换新。
+
 已经装过的会自动跳过，重复双击不会重复装。安装日志：Windows `%LOCALAPPDATA%\ClaudeCode中文安装器.log`，Mac `~/Library/Logs/ClaudeCode中文安装器.log`。
 
 ## 下载走哪里（不内置任何翻墙/代理）
