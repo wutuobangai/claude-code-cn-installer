@@ -1,6 +1,6 @@
 {
   "_说明": "安装器配置。普通用户不用打开这个文件。字段为空 = 安装器按默认走，不写任何 key。",
-  "installer_version": "0.1.0-draft-20260923",
+  "installer_version": "1.0.0",
 
   "api": {
     "_说明": "【配置位·现在留空】将来灵极 API 上线后，由我们在打包前填好 base_url 和 api_key。两个都非空时，安装器才会把它们写进用户的 ~/.claude/settings.json（写前自动备份原文件）。现在为空 = 不写，用户用 Claude 官方账号登录，或自己在 CC Switch 里填中转地址。",

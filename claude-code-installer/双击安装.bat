@@ -1,5 +1,5 @@
 @echo off
-rem Claude Code one-click installer (Windows) - draft 0.1.0 2026-09-23
+rem Claude Code one-click installer (Windows) - 1.0.0 2026-09-23
 rem Double-click me. No admin rights needed. The real work is in installer-files\install.ps1
 setlocal
 chcp 65001 >nul
