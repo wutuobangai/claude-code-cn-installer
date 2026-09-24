@@ -1,37 +1,283 @@
-# © Happy AI · 给教程截图：在一次性 Windows 虚拟机上装好软件、打开、截图（我们自己的截图）
+# © Happy AI · 给教程截图：在 GitHub 一次性虚拟机上装软件、打开、截图（我们自己的截图）
+#
+# 只手动触发（workflow_dispatch），不会自动跑。
+# 产物：一个 artifact「tutorial-shots」，文件名 = 教程里 <img data-shot="..."> 的名字 + .png
+#   <名>.png            到位的截图
+#   <名>__未到位.png     按钮没找到/页面不对时的当时画面（人工看图决定用不用）
+#   <名>__fullscreen.png 整屏截图兜底
+#   extra-*.png         附赠的备用图
+#   _status-*.json      每张图的结果和原因
+#
+# 吸取上次教训（Cherry Studio 静默安装卡死、整条被取消）：
+#   1. 每一步都有 timeout-minutes + continue-on-error，装不上就跳过，不拖死后面
+#   2. Windows 不用 Start-Process -Wait（会连安装器拉起的软件一起等）；一律 WaitForExit(上限)
+#   3. 优先用官方「免安装版」（CC Switch Portable.zip / Cherry Studio portable.exe），不走安装器；
+#      免安装版拿不到才退回官方安装包：.msi 用 msiexec /qn，NSIS .exe 用 /S（electron-builder 官方静默参数）
+#   4. 截图里只填占位值（sk-你的key / https://你的中转地址.com），不登录任何账号
 name: tutorial-shots
+
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
-  cherry:
-    runs-on: windows-latest
-    timeout-minutes: 30
+  # ---------------------------------------------------------------- Linux：公开网页 / 浏览器扩展 / ccr ui
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      SHOTS_DIR: ${{ github.workspace }}/shots
     steps:
-      - name: Download & install Cherry Studio (official GitHub release)
-        shell: pwsh
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 装截图工具（playwright + 中文字体 + 虚拟屏幕）
+        timeout-minutes: 12
         run: |
-          $rel = Invoke-RestMethod https://api.github.com/repos/CherryHQ/cherry-studio/releases/latest
-          $a = $rel.assets | Where-Object { $_.name -match 'x64-setup\.exe$|setup.*x64.*\.exe$|Setup.*\.exe$' } | Select-Object -First 1
-          if (-not $a) { $a = $rel.assets | Where-Object { $_.name -match '\.exe$' } | Select-Object -First 1 }
-          Write-Host "asset: $($a.name)"
-          Invoke-WebRequest $a.browser_download_url -OutFile cherry-setup.exe
-          Start-Process .\cherry-setup.exe -ArgumentList '/S' -Wait
-          Start-Sleep -Seconds 5
-      - name: Launch and screenshot
-        shell: pwsh
+          mkdir -p "$SHOTS_DIR"
+          sudo apt-get update -q
+          sudo apt-get install -y -q fonts-noto-cjk xvfb
+          pip install -q playwright pillow
+          python -m playwright install --with-deps chromium
+
+      - name: 截公开网页（CC Switch/Cherry 下载页、Chrome 商店、GreasyFork）
+        timeout-minutes: 8
+        continue-on-error: true
+        working-directory: .github/tutorial-shots
+        run: python web_shots.py pages
+
+      - name: 下载两个扩展的官方包（油猴=Chrome 商店官方 crx；All API Hub=作者 GitHub Release）
+        timeout-minutes: 4
+        continue-on-error: true
         run: |
-          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Cherry Studio.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $exe) { $exe = Get-ChildItem "C:\Program Files" -Recurse -Filter "Cherry Studio.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 }
-          Write-Host "exe: $($exe.FullName)"
-          if ($exe) { Start-Process $exe.FullName; Start-Sleep -Seconds 30 }
-          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
-          $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-          $bmp.Save("cherry-main.png")
+          mkdir -p ext
+          curl -fsSL --max-time 120 -o tm.crx "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=140.0&acceptformat=crx2,crx3&x=id%3Ddhdgffkkebhmkfjojejmpbldmpobfkfo%26installsource%3Dondemand%26uc" \
+            && (unzip -q -o tm.crx -d ext/tampermonkey || true)
+          TAG=$(curl -fsSI --max-time 20 https://github.com/qixing-jk/all-api-hub/releases/latest | tr -d '\r' | sed -n 's#^[Ll]ocation: .*/tag/##p' | head -1)
+          TAG=${TAG:-v4.0.0}
+          echo "All API Hub $TAG"
+          curl -fsSL --max-time 120 -o aah.zip "https://github.com/qixing-jk/all-api-hub/releases/download/$TAG/all-api-hub-${TAG#v}-chrome.zip" \
+            && (unzip -q -o aah.zip -d ext/all-api-hub || true)
+          for pair in "TM_DIR:ext/tampermonkey" "AAH_DIR:ext/all-api-hub"; do
+            k=${pair%%:*}; d=${pair#*:}
+            m=$(find "$PWD/$d" -maxdepth 3 -name manifest.json 2>/dev/null | head -1)
+            if [ -n "$m" ]; then echo "$k=$(dirname "$m")" >> "$GITHUB_ENV"; echo "$k ok"; else echo "$k 没拿到"; fi
+          done
+
+      - name: 截扩展（油猴「允许用户脚本」开关、All API Hub 新增账号/密钥管理）
+        timeout-minutes: 6
+        continue-on-error: true
+        working-directory: .github/tutorial-shots
+        run: xvfb-run -a python web_shots.py ext
+
+      - name: 装 claude-code-router（npm 官方包）
+        timeout-minutes: 6
+        continue-on-error: true
+        run: npm install -g @musistudio/claude-code-router 2>&1 | tail -n 5
+
+      - name: 启动 ccr 管理页（不打开浏览器；管理链接里的一次性令牌打码，不进日志）
+        timeout-minutes: 2
+        continue-on-error: true
+        run: |
+          timeout 60 ccr start --no-open --host 127.0.0.1 --port 3458 > ccr-start.log 2>&1 || true
+          URL=$(grep -oE 'http://(127\.0\.0\.1|localhost):[0-9]+[^ "]*' ccr-start.log | head -1)
+          if [ -n "$URL" ]; then
+            echo "::add-mask::$URL"
+            Q=${URL#*\?}; [ "$Q" != "$URL" ] && echo "::add-mask::$Q"
+            echo "CCR_URL=$URL" >> "$GITHUB_ENV"
+            echo "ccr 管理页已起来"
+          else
+            echo "没从输出里找到管理链接，退回默认 3458"
+          fi
+          sed -E 's/\?[^ ]*/?<已隐藏>/g' ccr-start.log | tail -n 20
+
+      - name: 截 ccr 设置页（供应商 / Agent 配置档案）
+        timeout-minutes: 6
+        continue-on-error: true
+        working-directory: .github/tutorial-shots
+        run: python web_shots.py ccr
+
+      - name: 停 ccr
+        if: always()
+        timeout-minutes: 1
+        continue-on-error: true
+        run: ccr stop || true
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: cherry-shots
-          path: cherry-main.png
+          name: shots-web
+          path: shots/
           if-no-files-found: warn
+
+  # ---------------------------------------------------------------- Windows：CC Switch / Cherry Studio / npm 安装终端
+  win:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      SHOTS_DIR: ${{ github.workspace }}\shots
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 装截图工具（只装 playwright 驱动，不下浏览器：直接连软件自己的网页内核）
+        timeout-minutes: 6
+        continue-on-error: true
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:SHOTS_DIR | Out-Null
+          python -m pip install -q playwright pillow
+
+      - name: 下载 CC Switch（官方免安装版 zip；拿不到再用官方 .msi 静默装）
+        timeout-minutes: 6
+        continue-on-error: true
+        run: |
+          . .github/tutorial-shots/win-lib.ps1
+          $tag = Get-LatestTag 'farion1231/cc-switch' 'v3.20.4'
+          Write-Host "CC Switch $tag"
+          $dir = Join-Path $env:RUNNER_TEMP 'ccs'
+          $zip = Join-Path $env:RUNNER_TEMP 'ccs.zip'
+          if (Get-File "https://github.com/farion1231/cc-switch/releases/download/$tag/CC-Switch-$tag-Windows-Portable.zip" $zip) {
+            Expand-Archive -Path $zip -DestinationPath $dir -Force
+          }
+          $exe = Get-ChildItem $dir -Recurse -Filter 'cc-switch.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) {
+            Write-Host "免安装版没拿到，改用 .msi 静默安装"
+            $msi = Join-Path $env:RUNNER_TEMP 'ccs.msi'
+            if (Get-File "https://github.com/farion1231/cc-switch/releases/download/$tag/CC-Switch-$tag-Windows.msi" $msi) {
+              Invoke-Bounded 'msiexec.exe' @('/i', "`"$msi`"", '/qn', '/norestart') 240 | Out-Null
+            }
+            $exe = @("$env:LOCALAPPDATA\Programs", $env:ProgramFiles) | ForEach-Object { Get-ChildItem $_ -Recurse -Filter 'cc-switch.exe' -ErrorAction SilentlyContinue } | Select-Object -First 1
+          }
+          if ($exe) { "CCS_EXE=$($exe.FullName)" >> $env:GITHUB_ENV; Write-Host "exe: $($exe.FullName)" } else { Write-Host "CC Switch 没装上，跳过" }
+
+      - name: 截 CC Switch（添加供应商窗口）
+        if: env.CCS_EXE != ''
+        timeout-minutes: 8
+        continue-on-error: true
+        run: |
+          # WebView2 读这个环境变量：打开调试端口 + 中文界面
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222 --lang=zh-CN'
+          $p = Start-Process -FilePath $env:CCS_EXE -PassThru
+          Set-Location .github/tutorial-shots
+          python desktop_shots.py ccswitch 9222
+          try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+          Get-Process -Name 'cc-switch' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: 下载 Cherry Studio（官方免安装版 portable.exe；拿不到再用官方安装包 /S 静默装，最多等 5 分钟）
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          . .github/tutorial-shots/win-lib.ps1
+          $tag = Get-LatestTag 'CherryHQ/cherry-studio' 'v2.1.2'
+          $ver = $tag.TrimStart('v')
+          Write-Host "Cherry Studio $tag"
+          $portable = Join-Path $env:RUNNER_TEMP 'cherry-portable.exe'
+          if (Get-File "https://github.com/CherryHQ/cherry-studio/releases/download/$tag/Cherry-Studio-$ver-win-x64-portable.exe" $portable 400) {
+            "CHERRY_EXE=$portable" >> $env:GITHUB_ENV; Write-Host "用免安装版"; exit 0
+          }
+          Write-Host "免安装版没拿到，改用安装包静默装"
+          $setup = Join-Path $env:RUNNER_TEMP 'cherry-setup.exe'
+          if (Get-File "https://github.com/CherryHQ/cherry-studio/releases/download/$tag/Cherry-Studio-$ver-win-x64-setup.exe" $setup 400) {
+            Invoke-Bounded $setup @('/S') 300 | Out-Null
+            # 安装器可能顺手把软件打开了（没带调试端口），先关掉，否则后面带端口启动会被单实例锁吞掉
+            Start-Sleep -Seconds 5
+            Get-Process -Name 'Cherry Studio' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            $exe = @("$env:LOCALAPPDATA\Programs", $env:ProgramFiles) | ForEach-Object { Get-ChildItem $_ -Recurse -Filter 'Cherry Studio.exe' -ErrorAction SilentlyContinue } | Select-Object -First 1
+            if ($exe) { "CHERRY_EXE=$($exe.FullName)" >> $env:GITHUB_ENV; Write-Host "exe: $($exe.FullName)" }
+          }
+
+      - name: 截 Cherry Studio（设置-模型服务 / 聊天页模型下拉）
+        if: env.CHERRY_EXE != ''
+        timeout-minutes: 8
+        continue-on-error: true
+        run: |
+          $p = Start-Process -FilePath $env:CHERRY_EXE -ArgumentList '--remote-debugging-port=9223', '--lang=zh-CN' -PassThru
+          Set-Location .github/tutorial-shots
+          python desktop_shots.py cherry 9223
+          try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+          Get-Process -Name 'Cherry Studio' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: 截 npm 安装 claude-code-router 的终端窗口
+        timeout-minutes: 8
+        continue-on-error: true
+        run: |
+          . .github/tutorial-shots/win-lib.ps1
+          $marker = Join-Path $env:RUNNER_TEMP 'ccr-done.txt'
+          $cmd = "Clear-Host; Write-Host 'PS C:\Users\you> npm install -g @musistudio/claude-code-router'; npm install -g @musistudio/claude-code-router; 'done' | Out-File '$marker'; Start-Sleep 900"
+          $p = Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoExit', '-NoLogo', '-Command', $cmd -WindowStyle Maximized -PassThru
+          $end = (Get-Date).AddMinutes(6)
+          while (-not (Test-Path $marker) -and (Get-Date) -lt $end) { Start-Sleep -Seconds 3 }
+          Start-Sleep -Seconds 3
+          $name = if (Test-Path $marker) { 'ccr-1-install' } else { 'ccr-1-install__未到位' }
+          Save-FullScreen (Join-Path $env:SHOTS_DIR "$name.png")
+          try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-win
+          path: shots/
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------- macOS：CC Switch 菜单栏小图标（尝试，截不到不影响其它）
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: 装 CC Switch 并尝试点开菜单栏图标
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          mkdir -p shots
+          defaults write -g AppleLanguages -array zh-Hans || true
+          TAG=$(curl -fsSI --max-time 20 https://github.com/farion1231/cc-switch/releases/latest | tr -d '\r' | sed -n 's#^[Ll]ocation: .*/tag/##p' | head -1)
+          TAG=${TAG:-v3.20.4}
+          echo "CC Switch $TAG"
+          curl -fsSL --max-time 240 -o ccs.tgz "https://github.com/farion1231/cc-switch/releases/download/$TAG/CC-Switch-$TAG-macOS.tar.gz"
+          mkdir -p "$HOME/Applications" && tar -xzf ccs.tgz -C "$HOME/Applications"
+          open "$HOME/Applications/CC Switch.app" || true
+          sleep 20
+          screencapture -x shots/extra-cc-switch-mac-main.png || true
+          CLICKED=0
+          for proc in "CC Switch" "cc-switch"; do
+            if osascript -e "tell application \"System Events\" to tell process \"$proc\" to click menu bar item 1 of menu bar 2"; then CLICKED=1; break; fi
+          done
+          sleep 2
+          if [ "$CLICKED" = 1 ]; then OUT=shots/cc-switch-3-tray.png; else OUT="shots/cc-switch-3-tray__未到位.png"; fi
+          screencapture -x "$OUT" || true
+          ls -la shots
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-mac
+          path: shots/
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------- 合成一个 artifact：tutorial-shots
+  merge:
+    needs: [web, win, mac]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/upload-artifact/merge@v4
+        with:
+          name: tutorial-shots
+          pattern: shots-*
+          delete-merged: true
