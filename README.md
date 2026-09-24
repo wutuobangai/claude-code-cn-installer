@@ -1,7 +1,7 @@
 # Claude Code 中文一键安装器（Happy AI）
 
 > ### ⬇️ 不会用 git？直接下载整合包（双击就装）
-> **[Windows 版](https://cdn.wutuobangai.com/tools/claude-code-installer/claude-code-installer-windows-happyai-v1.0.0.zip)** · **[Mac 版](https://cdn.wutuobangai.com/tools/claude-code-installer/claude-code-installer-mac-happyai-v1.0.0.zip)** · [图文说明页](https://wutuobangai.top/claude-code-installer.html?utm_source=github&utm_medium=readme&utm_campaign=claude-code-installer-20260923)
+> **[Windows 版](https://cdn.wutuobangai.com/tools/claude-code-installer/claude-code-installer-windows-happyai-v1.0.1.zip)** · **[Mac 版](https://cdn.wutuobangai.com/tools/claude-code-installer/claude-code-installer-mac-happyai-v1.0.1.zip)** · [图文说明页](https://wutuobangai.top/claude-code-installer.html?utm_source=github&utm_medium=readme&utm_campaign=claude-code-installer-20260923)
 >
 > 装好了还要账号：**Claude Pro / Max、ChatGPT Plus / Pro、Grok、Gemini 会员正规充值** → [Happy AI 官网](https://wutuobangai.top/?utm_source=github&utm_medium=readme&utm_campaign=claude-code-installer-20260923) · 用中转 key 的看 [CC Switch 填 key 教程](https://wutuobangai.top/tutorial-cc-switch.html?utm_source=github&utm_medium=readme&utm_campaign=claude-code-installer-20260923)
 >
